@@ -17,6 +17,10 @@ process.argv.forEach((parameter, index, array) => {
         buildSteps.push(buildSuseRpm);
     }
 
+    if (parameter.startsWith('fedora')) {
+        buildSteps.push(buildFedoraRpm);
+    }
+
     /*if (parameter.startsWith('appimage')) {
         buildSteps.push(buildAppImage);
     }*/
@@ -25,6 +29,7 @@ process.argv.forEach((parameter, index, array) => {
         buildSteps.push(buildDeb);
         buildSteps.push(buildSuseRpm);
         // buildSteps.push(buildAppImage);
+        buildSteps.push(buildFedoraRpm);
     }
 });
 
@@ -120,6 +125,64 @@ async function buildSuseRpm(): Promise<void> {
         },
         rpm: {
             depends: [ 'tuxedo-keyboard >= 3.0.0', 'libappindicator3-1' ],
+            fpm: [
+                '--after-install=./build-src/after_install.sh',
+                '--before-remove=./build-src/before_remove.sh',
+                '--replaces=tuxedofancontrol <= 0.1.9',
+                '--rpm-tag=%define _build_id_links none'
+            ]
+        }
+    };
+
+    console.log('\x1b[36m%s\x1b[0m', 'Create Suse RPM Package');
+    console.log('config', config);
+    await builder.build({
+        targets: builder.Platform.LINUX.createTarget(),
+        config
+    })
+    .then((result) => {
+        console.log('BUILD SUCCESS');
+        console.log(result);
+    })
+    .catch((error) => {
+        console.log('ERROR at BUILD');
+        console.log(error);
+    });
+}
+
+/**
+ * Function for create the Fedora RPM Package
+ */
+async function buildFedoraRpm(): Promise<void> {
+    const config: builder.Configuration = {
+        appId: 'tuxedocontrolcenter',
+        artifactName: '${productName}_${version}.${ext}',
+        directories: {
+            output: './dist/packages'
+        },
+        files: [
+            distSrc + '/**/*'
+        ],
+        extraResources: [
+            distSrc + '/data/service/tccd',
+            distSrc + '/data/service/TuxedoIOAPI.node',
+            distSrc + '/data/dist-data/tccd.service',
+            distSrc + '/data/dist-data/tccd-sleep.service',
+            distSrc + '/data/dist-data/tuxedo-control-center_256.svg',
+            distSrc + '/data/dist-data/tuxedo-control-center.desktop',
+            distSrc + '/data/dist-data/tuxedo-control-center-tray.desktop',
+            distSrc + '/data/dist-data/de.tuxedocomputers.tcc.policy',
+            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf'
+        ],
+        linux: {
+            target: [
+                'rpm'
+            ],
+            category: 'System',
+            description: 'TUXEDO Control Center Application'
+        },
+        rpm: {
+            depends: [ 'tuxedo-keyboard >= 3.0.0', 'libappindicator' ],
             fpm: [
                 '--after-install=./build-src/after_install.sh',
                 '--before-remove=./build-src/before_remove.sh',
