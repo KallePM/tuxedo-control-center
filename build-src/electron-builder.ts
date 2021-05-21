@@ -192,7 +192,7 @@ async function buildFedoraRpm(): Promise<void> {
         }
     };
 
-    console.log('\x1b[36m%s\x1b[0m', 'Create Suse RPM Package');
+    console.log('\x1b[36m%s\x1b[0m', 'Create Fedora RPM Package');
     console.log('config', config);
     await builder.build({
         targets: builder.Platform.LINUX.createTarget(),
