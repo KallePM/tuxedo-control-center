@@ -1,5 +1,5 @@
 /*!
- * Copyright (c) 2019-2021 TUXEDO Computers GmbH <tux@tuxedocomputers.com>
+ * Copyright (c) 2019-2022 TUXEDO Computers GmbH <tux@tuxedocomputers.com>
  *
  * This file is part of TUXEDO Control Center.
  *
@@ -25,6 +25,9 @@ import { TccDBusController } from '../common/classes/TccDBusController';
 import { TccProfile } from '../common/models/TccProfile';
 import { TccTray } from './TccTray';
 import { UserConfig } from './UserConfig';
+import { aquarisAPIHandle, AquarisState, ClientAPI, registerAPI } from './AquarisAPI';
+import { DeviceInfo, LCT21001, PumpVoltage, RGBState } from './LCT21001';
+import { NgTranslations, profileIdToI18nId } from './NgTranslations';
 
 // Tweak to get correct dirname for resource files outside app.asar
 const appPath = __dirname.replace('app.asar/', '');
@@ -37,6 +40,7 @@ const availableLanguages = [
     'en',
     'de'
 ];
+const translation = new NgTranslations();
 let startTCCAccelerator;
 
 startTCCAccelerator = app.commandLine.getSwitchValue('startTCCAccelerator');
@@ -45,6 +49,7 @@ if (startTCCAccelerator === '') {
 }
 
 let tccWindow: Electron.BrowserWindow;
+let aquarisWindow: Electron.BrowserWindow;
 const tray: TccTray = new TccTray(path.join(__dirname, '../../data/dist-data/tuxedo-control-center_256.png'));
 let tccDBus: TccDBusController;
 
@@ -87,11 +92,12 @@ app.whenReady().then( async () => {
         const systemLanguageId = app.getLocale().substring(0, 2);
         if (await userConfig.get('langId') === undefined) {
             if (availableLanguages.includes(systemLanguageId)) {
-                userConfig.set('langId', systemLanguageId);
+                await userConfig.set('langId', systemLanguageId);
             } else {
-                userConfig.set('langId', availableLanguages[0]);
+                await userConfig.set('langId', availableLanguages[0]);
             }
         }
+        await loadTranslation(await userConfig.get('langId'));
     } catch (err) {
         console.log('Error determining user language => ' + err);
         quitCurrentTccSession();
@@ -110,6 +116,7 @@ app.whenReady().then( async () => {
     tray.state.isPrimeSupported = primeSupported();
     await updateTrayProfiles();
     tray.events.startTCCClick = () => activateTccGui();
+    tray.events.startAquarisControl = () => activateTccGui('/main-gui/aquaris-control');
     tray.events.exitClick = () => quitCurrentTccSession();
     tray.events.autostartTrayToggle = () => {
         if (tray.state.isAutostartTrayInstalled) {
@@ -131,7 +138,7 @@ app.whenReady().then( async () => {
     tray.events.selectBuiltInClick = () => {
         if (dialog.showMessageBoxSync(messageBoxprimeSelectAccept) === 0) { primeSelectSet('off'); }
     };
-    tray.events.profileClick = (profileName: string) => { setTempProfile(profileName); };
+    tray.events.profileClick = (profileId: string) => { setTempProfileById(profileId); };
     tray.create();
 
     tray.state.powersaveBlockerActive = powersaveBlockerId !== undefined && powerSaveBlocker.isStarted(powersaveBlockerId);
@@ -194,7 +201,7 @@ app.whenReady().then( async () => {
     setInterval(async () => { updateTrayProfiles(); }, profilesCheckInterval);
 });
 
-app.on('will-quit', (event) => {
+app.on('will-quit', async (event) => {
     // Prevent default quit action
     event.preventDefault();
 
@@ -203,10 +210,20 @@ app.on('will-quit', (event) => {
         tccWindow.close();
         tccWindow = null;
     }
+    if (aquarisWindow) {
+        aquarisWindow.close();
+        aquarisWindow = null;
+    }
     if (!tray.isActive()) {
         // Actually quit
         globalShortcut.unregisterAll();
+        await aquarisCleanUp();
+        if (tccDBus !== undefined) {
+            tccDBus.disconnect();
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
         app.exit(0);
+        return;
     }
 });
 
@@ -216,13 +233,60 @@ app.on('window-all-closed', () => {
     }
 });
 
-function activateTccGui() {
+function activateTccGui(module?: string) {
     if (tccWindow) {
         if (tccWindow.isMinimized()) { tccWindow.restore(); }
         tccWindow.focus();
+        const baseURL = tccWindow.webContents.getURL().split("#")[0];
+        if (module !== undefined) {
+            tccWindow.loadURL(baseURL + '#' + module);
+        }
     } else {
         userConfig.get('langId').then(langId => {
-            createTccWindow(langId);
+            createTccWindow(langId, module);
+        });
+    }
+}
+
+function createAquarisControl(langId: string) {
+    let windowWidth = 700;
+    let windowHeight = 400;
+
+    aquarisWindow = new BrowserWindow({
+        title: 'Aquaris control',
+        width: windowWidth,
+        height: windowHeight,
+        frame: true,
+        resizable: true,
+        minWidth: windowWidth,
+        minHeight: windowHeight,
+        icon: path.join(__dirname, '../../data/dist-data/tuxedo-control-center_256.png'),
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false
+        }
+    });
+
+    // Hide menu bar
+    aquarisWindow.setMenuBarVisibility(false);
+    // Workaround to menu bar appearing after full screen state
+    aquarisWindow.on('leave-full-screen', () => { aquarisWindow.setMenuBarVisibility(false); });
+
+    aquarisWindow.on('closed', () => {
+        aquarisWindow = null;
+    });
+
+    const indexPath = path.join(__dirname, '..', '..', 'ng-app', langId, 'index.html');
+    aquarisWindow.loadFile(indexPath, { hash: '/main-gui/aquaris-control' });
+}
+
+function activateAquarisGui() {
+    if (aquarisWindow) {
+        if (aquarisWindow.isMinimized()) { aquarisWindow.restore(); }
+        aquarisWindow.focus();
+    } else {
+        userConfig.get('langId').then(langId => {
+            createAquarisControl(langId);
         });
     }
 }
@@ -250,6 +314,14 @@ async function setTempProfile(profileName: string) {
     return result;
 }
 
+async function setTempProfileById(profileId: string) {
+    const dbus = new TccDBusController();
+    await dbus.init();
+    const result = await dbus.dbusAvailable() && await dbus.setTempProfileById(profileId);
+    dbus.disconnect();
+    return result;
+}
+
 async function getActiveProfile(): Promise<TccProfile> {
     const dbus = new TccDBusController();
     await dbus.init();
@@ -263,9 +335,9 @@ async function getActiveProfile(): Promise<TccProfile> {
     return result;
 }
 
-function createTccWindow(langId: string) {
+function createTccWindow(langId: string, module?: string) {
     let windowWidth = 1040;
-    let windowHeight = 750;
+    let windowHeight = 770;
     if (windowWidth > screen.getPrimaryDisplay().workAreaSize.width) {
         windowWidth = screen.getPrimaryDisplay().workAreaSize.width;
     }
@@ -299,7 +371,11 @@ function createTccWindow(langId: string) {
     });
 
     const indexPath = path.join(__dirname, '..', '..', 'ng-app', langId, 'index.html');
-    tccWindow.loadFile(indexPath);
+    if (module !== undefined) {
+        tccWindow.loadFile(indexPath, { hash: '/' + module });
+    } else {
+        tccWindow.loadFile(indexPath);
+    }
 }
 
 function quitCurrentTccSession() {
@@ -330,6 +406,21 @@ ipcMain.handle('exec-cmd-async', async (event, arg) => {
     });
 });
 
+ipcMain.handle('exec-file-async', async (event, arg) => {
+    return new Promise((resolve, reject) => {
+        let strArg: string = arg;
+        let cmdList = strArg.split(' ');
+        let cmd = cmdList.shift();
+        child_process.execFile(cmd, cmdList, (err, stdout, stderr) => {
+            if (err) {
+                resolve({ data: stderr, error: err });
+            } else {
+                resolve({ data: stdout, error: err });
+            }
+        });
+    });
+});
+
 ipcMain.on('spawn-external-async', (event, arg) => {
     child_process.spawn(arg, { detached: true, stdio: 'ignore' }).on('error', (err) => {
         console.log("\"" + arg + "\" could not be executed.")
@@ -337,12 +428,43 @@ ipcMain.on('spawn-external-async', (event, arg) => {
     });
 });
 
+async function loadTranslation(langId) {
+
+    // Watch mode Workaround: Waiting for translation when starting in watch mode
+    let canLoadTranslation = false;
+    while (watchOption && !canLoadTranslation) {
+        try {
+            await translation.loadLanguage(langId);
+            canLoadTranslation = true;
+        } catch (err) {
+            console.log('Watch mode: Waiting for translation');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+    }
+    // End watch mode workaround
+
+    try {
+        await translation.loadLanguage(langId);
+    } catch (err) {
+        console.log('Failed loading translation => ' + err);
+        const fallbackLangId = 'en';
+        console.log('fallback to \'' + fallbackLangId + '\'');
+        try {
+            await translation.loadLanguage(fallbackLangId);
+        } catch (err) {
+            console.log('Failed loading fallback translation => ' + err);
+        }
+    }
+}
+
 async function changeLanguage(newLangId: string) {
     if (newLangId !== await userConfig.get('langId')) {
         await userConfig.set('langId', newLangId);
+        await loadTranslation(newLangId);
+        await updateTrayProfiles();
         if (tccWindow) {
             const indexPath = path.join(__dirname, '..', '..', 'ng-app', newLangId, 'index.html');
-            tccWindow.loadFile(indexPath);
+            await tccWindow.loadFile(indexPath);
         }
     }
 }
@@ -464,6 +586,16 @@ async function updateTrayProfiles() {
     try {
         const updatedActiveProfile = await getActiveProfile();
         const updatedProfiles = await getProfiles();
+
+        // Replace default profile names/descriptions with translations
+        for (const profile of updatedProfiles) {
+            const profileTranslationId = profileIdToI18nId.get(profile.id);
+            if (profileTranslationId !== undefined) {
+                profile.name = translation.idToString(profileTranslationId.name);
+                profile.description = translation.idToString(profileTranslationId.description);
+            }
+        }
+
         if (JSON.stringify({ activeProfile: tray.state.activeProfile, profiles: tray.state.profiles }) !==
             JSON.stringify({ activeProfile: updatedActiveProfile, profiles: updatedProfiles })
         ) {
@@ -475,3 +607,288 @@ async function updateTrayProfiles() {
         console.log('updateTrayProfiles() exception => ' + err);
     }
 }
+
+async function updateDeviceState(dev: LCT21001, current: AquarisState, next: AquarisState, overrideCheck = false) {
+    if (!aquarisIoProgress) {
+        try {
+            aquarisIoProgress = true;
+            let updatedSomething;
+            do {
+                let updateLed = false;
+                let updateFan = false;
+                let updatePump = false;
+
+                updateLed = overrideCheck ||
+                            current.red !== next.red || current.green !== next.green || current.blue !== next.blue ||
+                            current.ledMode !== next.ledMode || current.ledOn !== next.ledOn;
+                if (updateLed) {
+                    current.red = next.red;
+                    current.green = next.green;
+                    current.blue = next.blue;
+                    current.ledMode = next.ledMode;
+                    current.ledOn = next.ledOn;
+                    if (next.deviceUUID !== 'demo') {
+                        if (next.ledOn) {
+                            await dev.writeRGB(next.red, next.green, next.blue, next.ledMode);
+                        } else {
+                            await dev.writeRGBOff();
+                        }
+                    }
+                }
+
+                updateFan = overrideCheck ||
+                            current.fanDutyCycle !== next.fanDutyCycle || current.fanOn !== next.fanOn;
+                if (updateFan) {
+                    current.fanDutyCycle = next.fanDutyCycle;
+                    current.fanOn = next.fanOn;
+                    if (next.deviceUUID !== 'demo') {
+                        if (next.fanOn) {
+                            await dev.writeFanMode(next.fanDutyCycle);
+                        } else {
+                            await dev.writeFanOff();
+                        }
+                    }
+                }
+
+                updatePump = overrideCheck ||
+                            current.pumpDutyCycle !== next.pumpDutyCycle || current.pumpVoltage !== next.pumpVoltage || current.pumpOn !== next.pumpOn;
+                if (updatePump) {
+                    current.pumpDutyCycle = next.pumpDutyCycle;
+                    current.pumpVoltage = next.pumpVoltage;
+                    current.pumpOn = next.pumpOn;
+                    if (next.deviceUUID !== 'demo') {
+                        if (next.pumpOn) {
+                            await dev.writePumpMode(next.pumpDutyCycle, next.pumpVoltage);
+                        } else {
+                            await dev.writePumpOff();
+                        }
+                    }
+                }
+                overrideCheck = false;
+                updatedSomething = updateLed || updateFan || updatePump;
+            } while (updatedSomething);
+            aquarisIoProgress = false;
+        } catch (err) {
+            console.log('updateDeviceState error => ' + err);
+        } finally {
+            aquarisIoProgress = false;
+        }
+    }
+}
+
+let aquarisStateExpected: AquarisState;
+let aquarisStateCurrent: AquarisState;
+
+let aquarisIoProgress = false;
+let aquarisSearchProgress = false;
+let aquarisConnectProgress = false;
+
+let aquarisHasBluetooth = true;
+
+let searchingTimeout: NodeJS.Timeout;
+let searchingDelayMs = 1000;
+let discoverTries = 0;
+const discoverMaxTries = 5;
+let interestTries = 0;
+const interestMaxTries = 8;
+let isSearching = false;
+
+async function doSearch() {
+    aquarisSearchProgress = true;
+    try {
+        isSearching = true;
+        // Start discover if not started or restart if reached discover max tries
+        if (!await aquaris.isDiscovering()  || discoverTries >= discoverMaxTries) {
+            discoverTries = 0;
+            await aquaris.stopDiscover();
+            aquarisHasBluetooth = await aquaris.startDiscover();
+            if (!aquarisHasBluetooth) {
+                aquarisSearchProgress = false;
+                await stopSearch();
+                return;
+            }
+            // Wait a moment after reconnect for initial discovery to have a chance
+            await new Promise(resolve => setTimeout(resolve, 500));
+        } else {
+            discoverTries += 1;
+        }
+
+        // Look for devices
+        devicesList = await aquaris.getDeviceList();
+
+        // Trigger another search if not timed out
+        if (interestTries < interestMaxTries) {
+            interestTries += 1;
+            searchingTimeout = setTimeout(doSearch, searchingDelayMs);
+        } else {
+            aquarisSearchProgress = false;
+            await stopSearch();
+        }
+    } finally {
+        aquarisSearchProgress = false;
+    }
+}
+
+async function startSearch() {
+    if (!isSearching) {
+        await doSearch();
+    }
+    interestTries = 0;
+}
+
+async function stopSearch() {
+    while (aquarisSearchProgress) await new Promise(resolve => setTimeout(resolve, 100));
+    devicesList = [];
+    isSearching = false;
+    clearTimeout(searchingTimeout);
+    searchingTimeout = undefined;
+    interestTries = 0;
+    discoverTries = discoverMaxTries;
+}
+
+async function aquarisCleanUp() {
+    if (aquaris !== undefined) {
+        await aquaris.disconnect();
+        await stopSearch();
+        await aquaris.stopDiscover();
+    }
+}
+
+async function aquarisConnectedDemo() {
+    return aquarisStateCurrent !== undefined && aquarisStateCurrent.deviceUUID === 'demo';
+}
+
+let devicesList: DeviceInfo[] = [];
+const aquaris = new LCT21001();
+const aquarisHandlers = new Map<string, (...args: any[]) => any>()
+    .set(ClientAPI.prototype.connect.name, async (deviceUUID) => {
+        aquarisConnectProgress = true;
+        try {
+            await stopSearch();
+
+            if (deviceUUID === 'demo') {
+                await new Promise(resolve => setTimeout(resolve, 600));
+            } else {
+                await aquaris.connect(deviceUUID);
+            }
+
+            aquarisStateCurrent = {
+                deviceUUID: deviceUUID,
+                red: 255,
+                green: 0,
+                blue: 0,
+                ledMode: RGBState.Static,
+                fanDutyCycle: 50,
+                pumpDutyCycle: 60,
+                pumpVoltage: PumpVoltage.V8,
+                ledOn: true,
+                fanOn: true,
+                pumpOn: true
+            };
+            const aquarisSavedSerialized = await userConfig.get('aquarisSaveState');
+            if (aquarisSavedSerialized !== undefined) {
+                aquarisStateExpected = JSON.parse(aquarisSavedSerialized) as AquarisState;
+            } else {
+                aquarisStateExpected = Object.assign({}, aquarisStateCurrent);
+            }
+            aquarisStateExpected.deviceUUID = deviceUUID;
+            await updateDeviceState(aquaris, aquarisStateCurrent, aquarisStateExpected, true);
+        } catch (err) {
+            console.log('err => ' + err);
+        } finally {
+            aquarisConnectProgress = false;
+        }
+    })
+
+    .set(ClientAPI.prototype.disconnect.name, async () => {
+        if (await aquarisConnectedDemo()) {
+            await new Promise(resolve => setTimeout(resolve, 600));
+        } else {
+            await aquaris.disconnect();
+        }
+        aquarisStateExpected.deviceUUID = undefined;
+        aquarisStateCurrent.deviceUUID = undefined;
+    })
+
+    .set(ClientAPI.prototype.isConnected.name, async () => {
+        if (await aquarisConnectedDemo()) return true;
+
+        if (aquarisIoProgress) {
+            return true;
+        } else {
+            const isConnected = await aquaris.isConnected();
+            if (!isConnected && aquarisStateExpected !== undefined) {
+                aquarisStateExpected.deviceUUID = undefined;
+            }
+            return isConnected;
+        }
+    })
+
+    .set(ClientAPI.prototype.hasBluetooth.name, async () => {
+        return aquarisHasBluetooth || await aquarisConnectedDemo();
+    })
+
+    .set(ClientAPI.prototype.startDiscover.name, async () => {
+
+    })
+
+    .set(ClientAPI.prototype.stopDiscover.name, async () => {
+
+    })
+
+    .set(ClientAPI.prototype.getDevices.name, async () => {
+        await startSearch();
+        return devicesList;
+    })
+
+    .set(ClientAPI.prototype.getState.name, async () => {
+        return aquarisStateExpected;
+    })
+
+    .set(ClientAPI.prototype.readFwVersion.name, async () => {
+        return (await aquaris.readFwVersion()).toString();
+    })
+
+    .set(ClientAPI.prototype.updateLED.name, async (red, green, blue, state) => {
+        aquarisStateExpected.red = red;
+        aquarisStateExpected.green = green;
+        aquarisStateExpected.blue = blue;
+        aquarisStateExpected.ledMode = state;
+        aquarisStateExpected.ledOn = true;
+        await updateDeviceState(aquaris, aquarisStateCurrent, aquarisStateExpected);
+    })
+
+    .set(ClientAPI.prototype.writeRGBOff.name, async () => {
+        aquarisStateExpected.ledOn = false;
+        await updateDeviceState(aquaris, aquarisStateCurrent, aquarisStateExpected);
+    })
+
+    .set(ClientAPI.prototype.writeFanMode.name, async (dutyCyclePercent) => {
+        aquarisStateExpected.fanDutyCycle = dutyCyclePercent;
+        aquarisStateExpected.fanOn = true;
+        await updateDeviceState(aquaris, aquarisStateCurrent, aquarisStateExpected);
+    })
+
+    .set(ClientAPI.prototype.writeFanOff.name, async () => {
+        aquarisStateExpected.fanOn = false;
+        await updateDeviceState(aquaris, aquarisStateCurrent, aquarisStateExpected);
+    })
+
+    .set(ClientAPI.prototype.writePumpMode.name, async (dutyCyclePercent, voltage) => {
+        aquarisStateExpected.pumpDutyCycle = dutyCyclePercent;
+        aquarisStateExpected.pumpVoltage = voltage;
+        aquarisStateExpected.pumpOn = true;
+        await updateDeviceState(aquaris, aquarisStateCurrent, aquarisStateExpected);
+    })
+
+    .set(ClientAPI.prototype.writePumpOff.name, async () => {
+        aquarisStateExpected.pumpOn = false;
+        await updateDeviceState(aquaris, aquarisStateCurrent, aquarisStateExpected);
+    })
+    
+    .set(ClientAPI.prototype.saveState.name, async () => {
+        if (await aquarisConnectedDemo()) return;
+        await userConfig.set('aquarisSaveState', JSON.stringify(aquarisStateCurrent));
+    });
+
+registerAPI(ipcMain, aquarisAPIHandle, aquarisHandlers);

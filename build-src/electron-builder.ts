@@ -55,7 +55,7 @@ async function buildDeb(): Promise<void> {
             distSrc + '/data/dist-data/tuxedo-control-center_256.svg',
             distSrc + '/data/dist-data/tuxedo-control-center.desktop',
             distSrc + '/data/dist-data/tuxedo-control-center-tray.desktop',
-            distSrc + '/data/dist-data/de.tuxedocomputers.tcc.policy',
+            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.policy',
             distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf'
         ],
         linux: {
@@ -66,7 +66,7 @@ async function buildDeb(): Promise<void> {
             description: 'TUXEDO Control Center Application'
         },
         deb: {
-            depends: ['tuxedo-keyboard (>= 3.0.6)', 'libayatana-appindicator3-1'],
+            depends: ['tuxedo-keyboard (>= 3.1.0)', 'libayatana-appindicator3-1'],
             category: 'System',
             fpm: [
                 '--after-install=./build-src/after_install.sh',
@@ -113,7 +113,7 @@ async function buildSuseRpm(): Promise<void> {
             distSrc + '/data/dist-data/tuxedo-control-center_256.svg',
             distSrc + '/data/dist-data/tuxedo-control-center.desktop',
             distSrc + '/data/dist-data/tuxedo-control-center-tray.desktop',
-            distSrc + '/data/dist-data/de.tuxedocomputers.tcc.policy',
+            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.policy',
             distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf'
         ],
         linux: {
@@ -124,7 +124,7 @@ async function buildSuseRpm(): Promise<void> {
             description: 'TUXEDO Control Center Application'
         },
         rpm: {
-            depends: [ 'tuxedo-keyboard >= 3.0.6', '(libayatana-appindicator3-1 or libappindicator)' ],
+            depends: [ 'tuxedo-keyboard >= 3.1.0', '(libayatana-appindicator3-1 or libappindicator or libappindicator3-1)' ],
             fpm: [
                 '--after-install=./build-src/after_install.sh',
                 '--before-remove=./build-src/before_remove.sh',
@@ -230,7 +230,7 @@ async function buildAppImage(): Promise<void> {
             distSrc + '/data/dist-data/tuxedo-control-center_256.svg',
             distSrc + '/data/dist-data/tuxedo-control-center.desktop',
             distSrc + '/data/dist-data/tuxedo-control-center-tray.desktop',
-            distSrc + '/data/dist-data/de.tuxedocomputers.tcc.policy',
+            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.policy',
             distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf'
         ],
         linux: {
