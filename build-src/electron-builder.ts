@@ -171,7 +171,7 @@ async function buildFedoraRpm(): Promise<void> {
             distSrc + '/data/dist-data/tuxedo-control-center_256.svg',
             distSrc + '/data/dist-data/tuxedo-control-center.desktop',
             distSrc + '/data/dist-data/tuxedo-control-center-tray.desktop',
-            distSrc + '/data/dist-data/de.tuxedocomputers.tcc.policy',
+            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.policy',
             distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf'
         ],
         linux: {
@@ -182,7 +182,7 @@ async function buildFedoraRpm(): Promise<void> {
             description: 'TUXEDO Control Center Application'
         },
         rpm: {
-            depends: [ 'tuxedo-keyboard >= 3.0.0', 'libappindicator' ],
+            depends: [ 'tuxedo-keyboard >= 3.1.0', 'libappindicator' ],
             fpm: [
                 '--after-install=./build-src/after_install.sh',
                 '--before-remove=./build-src/before_remove.sh',
