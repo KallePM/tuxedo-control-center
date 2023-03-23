@@ -43,6 +43,7 @@ async function buildDeb(): Promise<void> {
         directories: {
             output: './dist/packages'
         },
+
         files: [
             distSrc + '/**/*'
         ],
@@ -56,7 +57,11 @@ async function buildDeb(): Promise<void> {
             distSrc + '/data/dist-data/tuxedo-control-center.desktop',
             distSrc + '/data/dist-data/tuxedo-control-center-tray.desktop',
             distSrc + '/data/dist-data/com.tuxedocomputers.tccd.policy',
-            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf'
+            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf',
+            distSrc + '/data/camera/cameractrls.py',
+            distSrc + '/data/dist-data/99-webcam.rules',
+            distSrc + '/data/dist-data/com.tuxedocomputers.tomte.policy',
+            distSrc + '/data/camera/v4l2_kernel_names.json'
         ],
         linux: {
             target: [
@@ -114,7 +119,10 @@ async function buildSuseRpm(): Promise<void> {
             distSrc + '/data/dist-data/tuxedo-control-center.desktop',
             distSrc + '/data/dist-data/tuxedo-control-center-tray.desktop',
             distSrc + '/data/dist-data/com.tuxedocomputers.tccd.policy',
-            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf'
+            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf',
+            distSrc + '/data/camera/cameractrls.py',
+            distSrc + '/data/camera/v4l2_kernel_names.json',
+            distSrc + '/data/dist-data/99-webcam.rules'
         ],
         linux: {
             target: [
@@ -231,7 +239,10 @@ async function buildAppImage(): Promise<void> {
             distSrc + '/data/dist-data/tuxedo-control-center.desktop',
             distSrc + '/data/dist-data/tuxedo-control-center-tray.desktop',
             distSrc + '/data/dist-data/com.tuxedocomputers.tccd.policy',
-            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf'
+            distSrc + '/data/dist-data/com.tuxedocomputers.tccd.conf',
+            distSrc + '/data/camera/cameractrls.py',
+            distSrc + '/data/camera/v4l2_kernel_names.json',
+            distSrc + '/data/dist-data/99-webcam.rules'
         ],
         linux: {
             target: [
